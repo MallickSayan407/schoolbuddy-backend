@@ -14,10 +14,6 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-@ConditionalOnProperty(
-        name = "ai.provider",
-        havingValue = "sarvam"
-)
 public class SarvamLLMClient implements LLMClient {
 
     private final RestClient restClient;

@@ -1,14 +1,9 @@
 package com.schoolbuddy.ai;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 @Service
-@ConditionalOnProperty(
-        name = "ai.provider",
-        havingValue = "mock",
-        matchIfMissing = true
-)
 public class MockLLMClient implements LLMClient {
 
     @Override
@@ -470,9 +465,6 @@ public class MockLLMClient implements LLMClient {
 
                 3. Can you give one real-world example?
 
-                4. What would happen if one important part of the
-                   process changed?
-
                 **Challenge:**
 
                 Try answering without looking at your notes.
@@ -507,378 +499,203 @@ public class MockLLMClient implements LLMClient {
                 );
 
         /*
-         * ============================================================
-         * DETERMINE QUIZ STATE
-         * ============================================================
-         *
-         * We use the previous conversation to determine whether the
-         * learner is:
-         *
-         * 1. Answering the FIRST question
-         * 2. Answering the SECOND question
-         * 3. Already completed the equation
+         * A quiz-start request must always begin a fresh quiz.
+         * Do not let unrelated earlier conversation determine the state.
          */
+        boolean startsQuiz =
+                answer.contains("start a quiz")
+                        || answer.contains("start quiz")
+                        || answer.contains("begin a quiz")
+                        || answer.contains("begin quiz")
+                        || answer.equals("quiz")
+                        || answer.contains("quiz about")
+                        || answer.contains("quiz on");
 
-        boolean firstStepAlreadyCompleted =
-                hasPreviousConversation
-                        && (
-                        conversationContext.contains("3x = 15")
-                                || conversationContext.contains("Now we have isolated 3x")
-                                || conversationContext.contains("What should you do to isolate x?")
-                );
-
-        boolean quizAlreadyCompleted =
-                hasPreviousConversation
-                        && (
-                        conversationContext.contains("x = 5")
-                                && conversationContext.contains("Verification")
-                );
-
+        if (startsQuiz) {
+            return generateQuizStartResponse(grade, answer);
+        }
 
         /*
-         * ============================================================
-         * FIRST QUIZ TURN
-         * ============================================================
+         * After the first question, inspect the current quiz history.
+         * The mock quiz intentionally remains small and deterministic.
          */
+        if (hasPreviousConversation
+                && conversationContext.contains("Plant Quiz")) {
 
-        if (!hasPreviousConversation) {
+            boolean correct =
+                    answer.contains("photosynthesis")
+                            || answer.contains("make food")
+                            || answer.contains("makes food")
+                            || answer.contains("food for itself");
+
+            if (correct) {
+                return """
+                    **Plant Quiz — Grade %d**
+
+                    Correct! 🎉
+
+                    Plants use sunlight to help make their own food
+                    through a process called **photosynthesis**.
+
+                    **Next Question:**
+
+                    What gas do plants take in from the air during
+                    photosynthesis?
+
+                    Your turn!
+                    """.formatted(grade);
+            }
 
             return """
-                Quiz Mode — Grade %d
+                **Plant Quiz Feedback — Grade %d**
 
-                Look at the equation:
+                Not quite. Think about the process plants use to make
+                their own food.
 
-                3x + 5 = 20
+                **Hint:** It starts with the letter **P**.
 
-                Question:
+                Try again!
+                """.formatted(grade);
+        }
 
-                What should you do FIRST to begin isolating 3x?
+        if (hasPreviousConversation
+                && conversationContext.contains("Math Quiz")) {
 
-                Think about the operation attached to 3x.
+            boolean correct =
+                    answer.contains("35")
+                            || answer.contains("thirty-five")
+                            || answer.contains("thirty five");
+
+            if (correct) {
+                return """
+                    **Math Quiz — Grade %d**
+
+                    Correct! 🎉
+
+                    5 × 7 = 35.
+
+                    **Next Question:**
+
+                    What is 8 × 6?
+
+                    Your turn!
+                    """.formatted(grade);
+            }
+
+            return """
+                **Math Quiz Feedback — Grade %d**
+
+                Not quite.
+
+                Try 5 groups of 7 and think about repeated addition.
 
                 Your turn!
                 """.formatted(grade);
         }
 
+        if (hasPreviousConversation
+                && conversationContext.contains("English Quiz")) {
 
-        /*
-         * ============================================================
-         * QUIZ ALREADY COMPLETED
-         * ============================================================
-         */
+            boolean correct =
+                    answer.contains("noun")
+                            || answer.contains("person")
+                            || answer.contains("place")
+                            || answer.contains("thing");
 
-        if (quizAlreadyCompleted) {
-
-            return """
-                Quiz Complete — Grade %d
-
-                You successfully solved:
-
-                3x + 5 = 20
-
-                Final answer:
-
-                x = 5
-
-                Verification:
-
-                3(5) + 5 = 20
-                15 + 5 = 20 ✓
-
-                Excellent work!
-
-                Would you like another equation to practice?
-                """.formatted(grade);
-        }
-
-
-        /*
-         * ============================================================
-         * ANSWERING FIRST QUESTION
-         * ============================================================
-         */
-
-        if (!firstStepAlreadyCompleted) {
-
-            /*
-             * --------------------------------------------------------
-             * Correct first step
-             * --------------------------------------------------------
-             */
-
-            boolean subtractFive =
-                    answer.contains("subtract 5")
-                            || answer.contains("subtract five")
-                            || answer.contains("minus 5")
-                            || answer.contains("minus five")
-                            || answer.contains("subtraction")
-                            || answer.contains("take away 5")
-                            || answer.contains("take away five")
-                            || answer.contains("subtract 5 from both sides")
-                            || answer.contains("subtract five from both sides");
-
-
-            /*
-             * --------------------------------------------------------
-             * Wrong: divide by 3 too early
-             * --------------------------------------------------------
-             */
-
-            boolean divideThree =
-                    answer.contains("divide by 3")
-                            || answer.contains("divide 3")
-                            || answer.contains("divide both sides by 3")
-                            || answer.contains("dividing by 3")
-                            || answer.contains("division by 3");
-
-
-            /*
-             * --------------------------------------------------------
-             * Wrong: multiply by 5
-             * --------------------------------------------------------
-             */
-
-            boolean multiplyFive =
-                    answer.contains("multiply 5")
-                            || answer.contains("multiply by 5")
-                            || answer.contains("multiply five")
-                            || answer.contains("times 5")
-                            || answer.contains("multiplication");
-
-
-            /*
-             * --------------------------------------------------------
-             * WRONG: DIVIDE BY 3 TOO EARLY
-             * --------------------------------------------------------
-             */
-
-            if (divideThree) {
-
+            if (correct) {
                 return """
-                    Quiz Feedback — Grade %d
+                    **English Quiz — Grade %d**
 
-                    Not quite.
+                    Correct! 🎉
 
-                    You identified an operation involving the 3,
-                    but dividing by 3 is not the first step.
+                    A noun names a person, place, animal, or thing.
 
-                    Look at the equation:
+                    **Next Question:**
 
-                    3x + 5 = 20
+                    What is the verb in this sentence?
 
-                    The +5 is still attached to 3x.
-
-                    Before dividing by 3, we need to remove the +5.
-
-                    The inverse operation of addition is subtraction.
-
-                    So first:
-
-                    3x + 5 - 5 = 20 - 5
-
-                    Therefore:
-
-                    3x = 15
-
-                    Now we have isolated 3x.
-
-                    Next Question:
-
-                    What should you do to isolate x?
+                    **The bird flies in the sky.**
 
                     Your turn!
                     """.formatted(grade);
             }
 
-
-            /*
-             * --------------------------------------------------------
-             * WRONG: MULTIPLY BY 5
-             * --------------------------------------------------------
-             */
-
-            if (multiplyFive) {
-
-                return """
-                    Quiz Feedback — Grade %d
-
-                    Not quite.
-
-                    Look at:
-
-                    3x + 5 = 20
-
-                    The +5 is being added to 3x.
-
-                    Think about inverse operations.
-
-                    What operation would undo addition?
-
-                    Hint:
-
-                    Addition and subtraction are inverse operations.
-
-                    Try answering again in your own words.
-
-                    Your turn!
-                    """.formatted(grade);
-            }
-
-
-            /*
-             * --------------------------------------------------------
-             * CORRECT FIRST STEP
-             * --------------------------------------------------------
-             */
-
-            if (subtractFive) {
-
-                return """
-                    Quiz Feedback — Grade %d
-
-                    Great job! 🎯
-
-                    You identified the correct inverse operation.
-
-                    Starting with:
-
-                    3x + 5 = 20
-
-                    We subtract 5 from both sides:
-
-                    3x + 5 - 5 = 20 - 5
-
-                    So:
-
-                    3x = 15
-
-                    Now we have isolated 3x.
-
-                    Next Question:
-
-                    What should you do to isolate x?
-
-                    Your turn!
-                    """.formatted(grade);
-            }
-
-
-            /*
-             * --------------------------------------------------------
-             * DEFAULT FIRST-STEP WRONG ANSWER
-             * --------------------------------------------------------
-             */
-
             return """
-                Quiz Feedback — Grade %d
+                **English Quiz Feedback — Grade %d**
 
-                Not quite yet.
+                Not quite.
 
-                Look carefully at:
+                Look for the word that tells us what the subject is doing.
 
-                3x + 5 = 20
-
-                Ask yourself:
-
-                What operation is being performed on 3x?
-
-                Then think about the inverse operation that would
-                undo that operation.
-
-                Hint:
-
-                Focus on the +5 before dealing with the 3.
-
-                Try again in your own words.
-
-                Your turn!
+                Try again!
                 """.formatted(grade);
         }
 
-
         /*
-         * ============================================================
-         * ANSWERING SECOND QUESTION
-         * ============================================================
+         * If the user answers without explicitly starting a quiz in this
+         * turn and no known quiz state exists, start a fresh generic quiz.
          */
-
-        boolean divideByThree =
-                answer.contains("divide by 3")
-                        || answer.contains("divide 3")
-                        || answer.contains("divide both sides by 3")
-                        || answer.contains("dividing by 3")
-                        || answer.contains("division by 3")
-                        || answer.contains("divide both sides");
+        return generateQuizStartResponse(grade, answer);
+    }
 
 
-        /*
-         * ============================================================
-         * CORRECT SECOND STEP
-         * ============================================================
-         */
+    private String generateQuizStartResponse(int grade, String request) {
 
-        if (divideByThree) {
+        if (request.contains("plant")
+                || request.contains("science")
+                || request.contains("photosynthesis")) {
 
             return """
-                Quiz Feedback — Grade %d
+                **Plant Quiz — Grade %d**
 
-                Excellent! 🎉
+                **Question 1:**
 
-                We reached:
+                Why do plants need sunlight?
 
-                3x = 15
+                A) To help make their food
+                B) To make their roots grow instantly
+                C) To make the soil disappear
+                D) To make the leaves blue
 
-                Now divide both sides by 3:
-
-                3x / 3 = 15 / 3
-
-                Therefore:
-
-                x = 5
-
-                Final Answer:
-
-                x = 5
-
-                Verification:
-
-                3(5) + 5 = 20
-
-                15 + 5 = 20 ✓
-
-                Great work! You solved the equation correctly.
+                Your turn! Choose **A, B, C, or D**.
                 """.formatted(grade);
         }
 
+        if (request.contains("english")
+                || request.contains("grammar")
+                || request.contains("language")) {
 
-        /*
-         * ============================================================
-         * WRONG SECOND STEP
-         * ============================================================
-         */
+            return """
+                **English Quiz — Grade %d**
+
+                **Question 1:**
+
+                Which word is a noun in this sentence?
+
+                **The student reads a book.**
+
+                A) reads
+                B) student
+                C) the
+                D) a
+
+                Your turn! Choose **A, B, C, or D**.
+                """.formatted(grade);
+        }
 
         return """
-            Quiz Feedback — Grade %d
+            **Math Quiz — Grade %d**
 
-            You're very close.
+            **Question 1:**
 
-            We already simplified the equation to:
+            What is 5 × 7?
 
-            3x = 15
+            A) 30
+            B) 35
+            C) 40
+            D) 45
 
-            Now think about what is being multiplied by x.
-
-            The 3 is multiplied by x.
-
-            What inverse operation will undo multiplication by 3?
-
-            Hint:
-
-            Multiplication and division are inverse operations.
-
-            Try again in your own words.
-
-            Your turn!
+            Your turn! Choose **A, B, C, or D**.
             """.formatted(grade);
     }
 

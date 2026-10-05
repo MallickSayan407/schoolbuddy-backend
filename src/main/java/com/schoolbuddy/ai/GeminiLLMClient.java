@@ -2,43 +2,51 @@ package com.schoolbuddy.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schoolbuddy.exception.AiServiceException;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
-import com.schoolbuddy.exception.AiServiceException;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 @Service
-@ConditionalOnProperty(
-        name = "ai.provider",
-        havingValue = "gemini"
-)
 public class GeminiLLMClient implements LLMClient {
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
+
     private final String apiKey;
     private final String apiUrl;
-    private final String model;
+    private final List<String> models;
 
     public GeminiLLMClient(
             ObjectMapper objectMapper,
             @Value("${gemini.api.key:}") String apiKey,
             @Value("${gemini.api.url:https://generativelanguage.googleapis.com/v1beta}") String apiUrl,
-            @Value("${gemini.api.model:gemini-3.8-flash}") String model
+            @Value("${gemini.models:gemini-3.8-flash}") String modelsConfig
     ) {
         this.objectMapper = objectMapper;
         this.apiKey = apiKey;
         this.apiUrl = apiUrl;
-        this.model = model;
+
+        this.models = Arrays.stream(modelsConfig.split(","))
+                .map(String::trim)
+                .filter(model -> !model.isBlank())
+                .toList();
+
         this.restClient = RestClient.builder().build();
     }
+
+    // ============================================================
+    // TEXT GENERATION
+    // ============================================================
 
     @Override
     public String generate(
@@ -46,6 +54,7 @@ public class GeminiLLMClient implements LLMClient {
             String conversationContext,
             String userMessage
     ) {
+
         return callGemini(
                 systemPrompt,
                 conversationContext,
@@ -55,6 +64,11 @@ public class GeminiLLMClient implements LLMClient {
         );
     }
 
+    // ============================================================
+    // MULTIMODAL GENERATION
+    // Text + Image -> Text
+    // ============================================================
+
     @Override
     public String generate(
             String systemPrompt,
@@ -63,6 +77,7 @@ public class GeminiLLMClient implements LLMClient {
             String imageBase64,
             String imageMimeType
     ) {
+
         return callGemini(
                 systemPrompt,
                 conversationContext,
@@ -71,6 +86,10 @@ public class GeminiLLMClient implements LLMClient {
                 imageMimeType
         );
     }
+
+    // ============================================================
+    // GEMINI MODEL CASCADE
+    // ============================================================
 
     private String callGemini(
             String systemPrompt,
@@ -87,9 +106,15 @@ public class GeminiLLMClient implements LLMClient {
             );
         }
 
+        if (models.isEmpty()) {
+            throw new IllegalStateException(
+                    "No Gemini models are configured."
+            );
+        }
+
         /*
-         * Combine SchoolBuddy's system instructions
-         * with the previous conversation.
+         * Combine SchoolBuddy system instructions
+         * with previous conversation context.
          */
         String fullPrompt =
                 systemPrompt
@@ -97,7 +122,7 @@ public class GeminiLLMClient implements LLMClient {
                         + conversationContext;
 
         /*
-         * Build contents[]
+         * Build Gemini contents[]
          */
         Map<String, Object> content = new HashMap<>();
         content.put("role", "user");
@@ -179,147 +204,225 @@ public class GeminiLLMClient implements LLMClient {
         );
 
         /*
-         * Gemini endpoint:
+         * ========================================================
+         * MODEL CASCADE
+         * ========================================================
          *
-         * /v1beta/models/{model}:generateContent
+         * Example:
+         *
+         * 1. gemini-3.8-flash
+         * 2. gemini-3.7-flash
+         * 3. gemini-3.6-flash
+         * 4. gemini-3.5-flash
+         * 5. gemini-3.5-flash-lite
+         * 6. gemini-3.1-flash-lite
+         *
+         * If one model fails because of quota/rate limit/server
+         * availability, the next model is attempted.
          */
+
+        Exception lastException = null;
+
+        for (String model : models) {
+
+            try {
+
+                System.out.println(
+                        "AI Router: trying Gemini model: "
+                                + model
+                );
+
+                String responseBody =
+                        callSingleGeminiModel(
+                                model,
+                                requestBody
+                        );
+
+                String answer =
+                        extractText(responseBody);
+
+                System.out.println(
+                        "AI Router: Gemini model succeeded: "
+                                + model
+                );
+
+                return answer;
+
+            } catch (Exception exception) {
+
+                lastException = exception;
+
+                System.err.println(
+                        "AI Router: Gemini model failed: "
+                                + model
+                                + " -> "
+                                + exception.getMessage()
+                );
+
+                /*
+                 * Continue to the next Gemini model.
+                 */
+            }
+        }
+
+        /*
+         * All configured Gemini models failed.
+         */
+        throw new AiServiceException(
+                "All configured Gemini models are currently unavailable. "
+                        + "Please try again later.",
+                lastException
+        );
+    }
+
+    // ============================================================
+    // SINGLE GEMINI MODEL REQUEST
+    // ============================================================
+
+    private String callSingleGeminiModel(
+            String model,
+            Map<String, Object> requestBody
+    ) {
+
         String endpoint =
                 apiUrl
                         + "/models/"
                         + model
                         + ":generateContent";
 
-        /*
-         * Call Gemini with automatic retry
-         * for temporary 503 / 429 errors.
-         */
-        String responseBody =
-                callGeminiWithRetry(
-                        endpoint,
-                        requestBody
-                );
-
-        return extractText(responseBody);
-    }
-
-    /*
-     * ============================================================
-     * GEMINI RETRY HANDLING
-     * ============================================================
-     *
-     * 503 = Gemini temporarily unavailable / high demand
-     * 429 = rate limit exceeded
-     *
-     * We retry these errors because they can be temporary.
-     */
-    private String callGeminiWithRetry(
-            String endpoint,
-            Map<String, Object> requestBody
-    ) {
-
-        int maxAttempts = 3;
-
-        for (int attempt = 1;
-             attempt <= maxAttempts;
-             attempt++) {
-
-            try {
-
-                return restClient.post()
-                        .uri(endpoint)
-                        .contentType(
-                                MediaType.APPLICATION_JSON
-                        )
-                        .header(
-                                "x-goog-api-key",
-                                apiKey
-                        )
-                        .body(requestBody)
-                        .retrieve()
-                        .body(String.class);
-
-            } catch (
-                    org.springframework.web.client
-                            .HttpServerErrorException.ServiceUnavailable
-                            exception
-            ) {
-
-                /*
-                 * Gemini returned HTTP 503.
-                 */
-                if (attempt == maxAttempts) {
-
-                    throw new AiServiceException(
-                            "SchoolBuddy AI is temporarily unavailable. "
-                                    + "Please try again later.",
-                            exception
-                    );
-                }
-
-                waitBeforeRetry(attempt);
-
-            } catch (
-                    org.springframework.web.client
-                            .HttpClientErrorException.TooManyRequests
-                            exception
-            ) {
-
-                /*
-                 * Gemini returned HTTP 429.
-                 */
-                if (attempt == maxAttempts) {
-
-                    throw new AiServiceException(
-                            "SchoolBuddy AI has temporarily reached its usage limit. "
-                                    + "Please try again later.",
-                            exception
-                    );
-                }
-
-                waitBeforeRetry(attempt);
-            }
-        }
-
-        throw new IllegalStateException(
-                "Gemini request failed unexpectedly."
-        );
-    }
-
-    /*
-     * Exponential-style retry delay:
-     *
-     * Attempt 1 → 1.5 seconds
-     * Attempt 2 → 3 seconds
-     */
-    private void waitBeforeRetry(int attempt) {
-
         try {
 
-            long delayMillis =
-                    switch (attempt) {
-                        case 1 -> 1500;
-                        case 2 -> 3000;
-                        default -> 5000;
-                    };
+            return restClient.post()
+                    .uri(endpoint)
+                    .contentType(
+                            MediaType.APPLICATION_JSON
+                    )
+                    .header(
+                            "x-goog-api-key",
+                            apiKey
+                    )
+                    .body(requestBody)
+                    .retrieve()
+                    .body(String.class);
 
-            Thread.sleep(delayMillis);
+        } catch (
+                HttpClientErrorException.TooManyRequests exception
+        ) {
 
-        } catch (InterruptedException exception) {
-
-            Thread.currentThread().interrupt();
+            /*
+             * HTTP 429
+             *
+             * Usually quota/rate-limit related.
+             *
+             * Do NOT perform long retries here.
+             * Immediately move to the next Gemini model.
+             */
 
             throw new RuntimeException(
-                    "Gemini retry interrupted.",
+                    "HTTP 429 - Gemini model quota/rate limit reached.",
+                    exception
+            );
+
+        } catch (
+                HttpClientErrorException.BadRequest exception
+        ) {
+
+            /*
+             * HTTP 400
+             *
+             * Usually indicates an invalid request/model configuration.
+             * Move to the next configured model.
+             */
+
+            throw new RuntimeException(
+                    "HTTP 400 - Invalid Gemini request.",
+                    exception
+            );
+
+        } catch (
+                HttpClientErrorException.NotFound exception
+        ) {
+
+            /*
+             * HTTP 404
+             *
+             * Model may not exist or may not be available.
+             */
+
+            throw new RuntimeException(
+                    "HTTP 404 - Gemini model not found.",
+                    exception
+            );
+
+        } catch (
+                HttpClientErrorException.Forbidden exception
+        ) {
+
+            /*
+             * HTTP 403
+             *
+             * API key / permission / access issue.
+             */
+
+            throw new RuntimeException(
+                    "HTTP 403 - Gemini access forbidden.",
+                    exception
+            );
+
+        } catch (
+                HttpServerErrorException.InternalServerError exception
+        ) {
+
+            /*
+             * HTTP 500
+             */
+            throw new RuntimeException(
+                    "HTTP 500 - Gemini internal server error.",
+                    exception
+            );
+
+        } catch (
+                HttpServerErrorException.BadGateway exception
+        ) {
+
+            /*
+             * HTTP 502
+             */
+            throw new RuntimeException(
+                    "HTTP 502 - Gemini bad gateway.",
+                    exception
+            );
+
+        } catch (
+                HttpServerErrorException.ServiceUnavailable exception
+        ) {
+
+            /*
+             * HTTP 503
+             */
+            throw new RuntimeException(
+                    "HTTP 503 - Gemini service unavailable.",
+                    exception
+            );
+
+        } catch (
+                HttpServerErrorException.GatewayTimeout exception
+        ) {
+
+            /*
+             * HTTP 504
+             */
+            throw new RuntimeException(
+                    "HTTP 504 - Gemini gateway timeout.",
                     exception
             );
         }
     }
 
-    /*
-     * ============================================================
-     * RESPONSE PARSING
-     * ============================================================
-     */
+    // ============================================================
+    // RESPONSE PARSING
+    // ============================================================
+
     private String extractText(String responseBody) {
 
         try {
