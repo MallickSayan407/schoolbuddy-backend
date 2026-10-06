@@ -11,6 +11,8 @@ import com.schoolbuddy.entity.Role;
 import com.schoolbuddy.repository.MessageRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import java.util.List;
 
@@ -259,6 +261,7 @@ public class ChatServiceImpl implements ChatService {
                         request.getImageBase64(),
                         request.getImageMimeType()
                 );
+        answer = normalizeMathFormatting(answer);
 
         /*
          * ---------------------------------------------------------
@@ -285,5 +288,281 @@ public class ChatServiceImpl implements ChatService {
                 conversation.getId(),
                 answer
         );
+    }
+
+    private String normalizeMathFormatting(String answer) {
+
+        if (answer == null || answer.isBlank()) {
+            return answer;
+        }
+
+        String normalized = answer;
+
+        /*
+         * ---------------------------------------------------------
+         * 1. Convert code-wrapped fractions
+         *
+         * `3/8`
+         *      ↓
+         * $\frac{3}{8}$
+         *
+         * `24/6`
+         *      ↓
+         * $\frac{24}{6}$
+         * ---------------------------------------------------------
+         */
+
+        Pattern fractionPattern =
+                Pattern.compile(
+                        "`\\s*(\\d+)\\s*/\\s*(\\d+)\\s*`"
+                );
+
+        Matcher fractionMatcher =
+                fractionPattern.matcher(normalized);
+
+        StringBuffer fractionResult =
+                new StringBuffer();
+
+        while (fractionMatcher.find()) {
+
+            String numerator =
+                    fractionMatcher.group(1);
+
+            String denominator =
+                    fractionMatcher.group(2);
+
+            String replacement =
+                    "$\\frac{"
+                            + numerator
+                            + "}{"
+                            + denominator
+                            + "}$";
+
+            fractionMatcher.appendReplacement(
+                    fractionResult,
+                    Matcher.quoteReplacement(replacement)
+            );
+        }
+
+        fractionMatcher.appendTail(fractionResult);
+
+        normalized =
+                fractionResult.toString();
+
+
+        /*
+         * ---------------------------------------------------------
+         * 2. Convert code-wrapped division
+         *
+         * `24÷6`
+         *      ↓
+         * $24 \div 6$
+         * ---------------------------------------------------------
+         */
+
+        Pattern divisionPattern =
+                Pattern.compile(
+                        "`\\s*(\\d+)\\s*÷\\s*(\\d+)\\s*`"
+                );
+
+        Matcher divisionMatcher =
+                divisionPattern.matcher(normalized);
+
+        StringBuffer divisionResult =
+                new StringBuffer();
+
+        while (divisionMatcher.find()) {
+
+            String dividend =
+                    divisionMatcher.group(1);
+
+            String divisor =
+                    divisionMatcher.group(2);
+
+            String replacement =
+                    "$"
+                            + dividend
+                            + " \\\\div "
+                            + divisor
+                            + "$";
+
+            divisionMatcher.appendReplacement(
+                    divisionResult,
+                    Matcher.quoteReplacement(replacement)
+            );
+        }
+
+        divisionMatcher.appendTail(divisionResult);
+
+        normalized =
+                divisionResult.toString();
+
+
+        /*
+         * ---------------------------------------------------------
+         * 3. Convert code-wrapped multiplication
+         *
+         * `6×4=24`
+         *      ↓
+         * $6 \times 4 = 24$
+         * ---------------------------------------------------------
+         */
+
+        Pattern multiplicationPattern =
+                Pattern.compile(
+                        "`\\s*(\\d+)\\s*×\\s*(\\d+)(?:\\s*=\\s*(\\d+))?\\s*`"
+                );
+
+        Matcher multiplicationMatcher =
+                multiplicationPattern.matcher(normalized);
+
+        StringBuffer multiplicationResult =
+                new StringBuffer();
+
+        while (multiplicationMatcher.find()) {
+
+            String left =
+                    multiplicationMatcher.group(1);
+
+            String right =
+                    multiplicationMatcher.group(2);
+
+            String result =
+                    multiplicationMatcher.group(3);
+
+            String replacement;
+
+            if (result != null) {
+
+                replacement =
+                        "$"
+                                + left
+                                + " \\\\times "
+                                + right
+                                + " = "
+                                + result
+                                + "$";
+
+            } else {
+
+                replacement =
+                        "$"
+                                + left
+                                + " \\\\times "
+                                + right
+                                + "$";
+            }
+
+            multiplicationMatcher.appendReplacement(
+                    multiplicationResult,
+                    Matcher.quoteReplacement(replacement)
+            );
+        }
+
+        multiplicationMatcher.appendTail(
+                multiplicationResult
+        );
+
+        normalized =
+                multiplicationResult.toString();
+
+
+        /*
+         * ---------------------------------------------------------
+         * 4. Convert simple code-wrapped numeric values
+         *
+         * `24`
+         *      ↓
+         * $24$
+         *
+         * This only targets standalone numeric backticks.
+         * Normal text/code backticks remain untouched.
+         * ---------------------------------------------------------
+         */
+
+        Pattern numericPattern =
+                Pattern.compile(
+                        "`\\s*(\\d+(?:\\.\\d+)?)\\s*`"
+                );
+
+        Matcher numericMatcher =
+                numericPattern.matcher(normalized);
+
+        StringBuffer numericResult =
+                new StringBuffer();
+
+        while (numericMatcher.find()) {
+
+            String number =
+                    numericMatcher.group(1);
+
+            String replacement =
+                    "$"
+                            + number
+                            + "$";
+
+            numericMatcher.appendReplacement(
+                    numericResult,
+                    Matcher.quoteReplacement(replacement)
+            );
+        }
+
+        numericMatcher.appendTail(numericResult);
+
+        normalized =
+                numericResult.toString();
+
+
+        /*
+         * ---------------------------------------------------------
+         * 5. Convert code-wrapped equations
+         *
+         * Example:
+         *
+         * `8-5=3`
+         *      ↓
+         * $8-5=3$
+         *
+         * This is intentionally limited to numeric arithmetic
+         * so normal code examples are not modified.
+         * ---------------------------------------------------------
+         */
+
+        Pattern equationPattern =
+                Pattern.compile(
+                        "`\\s*(\\d+\\s*[+\\-*=]\\s*\\d+(?:\\s*[+\\-*=]\\s*\\d+)*)\\s*`"
+                );
+
+        Matcher equationMatcher =
+                equationPattern.matcher(normalized);
+
+        StringBuffer equationResult =
+                new StringBuffer();
+
+        while (equationMatcher.find()) {
+
+            String equation =
+                    equationMatcher.group(1);
+
+            String replacement =
+                    "$"
+                            + equation
+                            + "$";
+
+            equationMatcher.appendReplacement(
+                    equationResult,
+                    Matcher.quoteReplacement(replacement)
+            );
+        }
+
+        equationMatcher.appendTail(
+                equationResult
+        );
+
+        normalized =
+                equationResult.toString();
+
+
+        return normalized;
     }
 }
