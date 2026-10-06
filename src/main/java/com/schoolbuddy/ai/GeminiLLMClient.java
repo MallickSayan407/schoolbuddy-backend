@@ -44,6 +44,7 @@ public class GeminiLLMClient implements LLMClient {
         this.restClient = RestClient.builder().build();
     }
 
+
     // ============================================================
     // TEXT GENERATION
     // ============================================================
@@ -63,6 +64,7 @@ public class GeminiLLMClient implements LLMClient {
                 null
         );
     }
+
 
     // ============================================================
     // MULTIMODAL GENERATION
@@ -87,6 +89,7 @@ public class GeminiLLMClient implements LLMClient {
         );
     }
 
+
     // ============================================================
     // GEMINI MODEL CASCADE
     // ============================================================
@@ -100,6 +103,7 @@ public class GeminiLLMClient implements LLMClient {
     ) {
 
         if (apiKey == null || apiKey.isBlank()) {
+
             throw new IllegalStateException(
                     "Gemini API key is not configured. "
                             + "Set the GEMINI_API_KEY environment variable."
@@ -107,32 +111,52 @@ public class GeminiLLMClient implements LLMClient {
         }
 
         if (models.isEmpty()) {
+
             throw new IllegalStateException(
                     "No Gemini models are configured."
             );
         }
 
+
         /*
-         * Combine SchoolBuddy system instructions
-         * with previous conversation context.
+         * ========================================================
+         * COMBINE SCHOOLBUDDY SYSTEM INSTRUCTIONS
+         * WITH PREVIOUS CONVERSATION CONTEXT
+         * ========================================================
          */
+
         String fullPrompt =
                 systemPrompt
                         + "\n\n"
                         + conversationContext;
 
-        /*
-         * Build Gemini contents[]
-         */
-        Map<String, Object> content = new HashMap<>();
-        content.put("role", "user");
-
-        List<Map<String, Object>> parts = new ArrayList<>();
 
         /*
-         * Text part
+         * ========================================================
+         * BUILD GEMINI CONTENTS[]
+         * ========================================================
          */
-        Map<String, Object> textPart = new HashMap<>();
+
+        Map<String, Object> content =
+                new HashMap<>();
+
+        content.put(
+                "role",
+                "user"
+        );
+
+        List<Map<String, Object>> parts =
+                new ArrayList<>();
+
+
+        /*
+         * --------------------------------------------------------
+         * TEXT PART
+         * --------------------------------------------------------
+         */
+
+        Map<String, Object> textPart =
+                new HashMap<>();
 
         textPart.put(
                 "text",
@@ -143,37 +167,53 @@ public class GeminiLLMClient implements LLMClient {
 
         parts.add(textPart);
 
+
         /*
-         * Optional image part
+         * --------------------------------------------------------
+         * OPTIONAL IMAGE PART
+         * --------------------------------------------------------
          */
-        if (imageBase64 != null && !imageBase64.isBlank()) {
+
+        if (imageBase64 != null
+                && !imageBase64.isBlank()) {
 
             String mimeType =
-                    imageMimeType == null || imageMimeType.isBlank()
+                    imageMimeType == null
+                            || imageMimeType.isBlank()
                             ? "image/jpeg"
                             : imageMimeType;
 
-            Map<String, Object> imagePart = new HashMap<>();
+            Map<String, Object> imagePart =
+                    new HashMap<>();
 
             imagePart.put(
                     "inline_data",
                     Map.of(
-                            "mime_type", mimeType,
-                            "data", imageBase64
+                            "mime_type",
+                            mimeType,
+                            "data",
+                            imageBase64
                     )
             );
 
             parts.add(imagePart);
         }
 
-        content.put("parts", parts);
+        content.put(
+                "parts",
+                parts
+        );
 
         List<Map<String, Object>> contents =
                 List.of(content);
 
+
         /*
-         * Request body
+         * ========================================================
+         * REQUEST BODY
+         * ========================================================
          */
+
         Map<String, Object> requestBody =
                 new HashMap<>();
 
@@ -182,9 +222,24 @@ public class GeminiLLMClient implements LLMClient {
                 contents
         );
 
+
         /*
-         * Generation configuration
+         * ========================================================
+         * GENERATION CONFIGURATION
+         * ========================================================
+         *
+         * 4096 gives SchoolBuddy enough output space for:
+         *
+         * - Step-by-step math solutions
+         * - Grade-aware explanations
+         * - Image-based questions
+         * - HINT / SIMPLIFY / PRACTICE / QUIZ
+         * - Longer Grade 9-10 answers
+         *
+         * The previous value was 1200, which could result in
+         * responses being cut off before the final answer.
          */
+
         Map<String, Object> generationConfig =
                 new HashMap<>();
 
@@ -195,13 +250,14 @@ public class GeminiLLMClient implements LLMClient {
 
         generationConfig.put(
                 "maxOutputTokens",
-                1200
+                4096
         );
 
         requestBody.put(
                 "generationConfig",
                 generationConfig
         );
+
 
         /*
          * ========================================================
@@ -217,8 +273,9 @@ public class GeminiLLMClient implements LLMClient {
          * 5. gemini-3.5-flash-lite
          * 6. gemini-3.1-flash-lite
          *
-         * If one model fails because of quota/rate limit/server
-         * availability, the next model is attempted.
+         * If one model fails because of quota, rate limit,
+         * server availability, invalid model, or truncated
+         * output, the next model is attempted.
          */
 
         Exception lastException = null;
@@ -265,15 +322,20 @@ public class GeminiLLMClient implements LLMClient {
             }
         }
 
+
         /*
-         * All configured Gemini models failed.
+         * ========================================================
+         * ALL CONFIGURED GEMINI MODELS FAILED
+         * ========================================================
          */
+
         throw new AiServiceException(
                 "All configured Gemini models are currently unavailable. "
                         + "Please try again later.",
                 lastException
         );
     }
+
 
     // ============================================================
     // SINGLE GEMINI MODEL REQUEST
@@ -313,8 +375,6 @@ public class GeminiLLMClient implements LLMClient {
              * HTTP 429
              *
              * Usually quota/rate-limit related.
-             *
-             * Do NOT perform long retries here.
              * Immediately move to the next Gemini model.
              */
 
@@ -330,8 +390,7 @@ public class GeminiLLMClient implements LLMClient {
             /*
              * HTTP 400
              *
-             * Usually indicates an invalid request/model configuration.
-             * Move to the next configured model.
+             * Invalid request/model configuration.
              */
 
             throw new RuntimeException(
@@ -376,6 +435,7 @@ public class GeminiLLMClient implements LLMClient {
             /*
              * HTTP 500
              */
+
             throw new RuntimeException(
                     "HTTP 500 - Gemini internal server error.",
                     exception
@@ -388,6 +448,7 @@ public class GeminiLLMClient implements LLMClient {
             /*
              * HTTP 502
              */
+
             throw new RuntimeException(
                     "HTTP 502 - Gemini bad gateway.",
                     exception
@@ -400,6 +461,7 @@ public class GeminiLLMClient implements LLMClient {
             /*
              * HTTP 503
              */
+
             throw new RuntimeException(
                     "HTTP 503 - Gemini service unavailable.",
                     exception
@@ -412,12 +474,14 @@ public class GeminiLLMClient implements LLMClient {
             /*
              * HTTP 504
              */
+
             throw new RuntimeException(
                     "HTTP 504 - Gemini gateway timeout.",
                     exception
             );
         }
     }
+
 
     // ============================================================
     // RESPONSE PARSING
@@ -443,9 +507,53 @@ public class GeminiLLMClient implements LLMClient {
                 );
             }
 
+
+            /*
+             * ====================================================
+             * CHECK WHY GEMINI STOPPED GENERATING
+             * ====================================================
+             *
+             * Gemini can return:
+             *
+             * STOP
+             * MAX_TOKENS
+             * SAFETY
+             * RECITATION
+             * LANGUAGE
+             * OTHER
+             *
+             * MAX_TOKENS means the configured output limit
+             * was reached. We should NOT return a partial
+             * educational answer to the student.
+             */
+
+            JsonNode candidate =
+                    candidates.get(0);
+
+            String finishReason =
+                    candidate
+                            .path("finishReason")
+                            .asText("");
+
+            if ("MAX_TOKENS".equalsIgnoreCase(
+                    finishReason
+            )) {
+
+                throw new IllegalStateException(
+                        "Gemini response was truncated because "
+                                + "the maximum output token limit was reached."
+                );
+            }
+
+
+            /*
+             * ====================================================
+             * EXTRACT RESPONSE PARTS
+             * ====================================================
+             */
+
             JsonNode parts =
-                    candidates
-                            .get(0)
+                    candidate
                             .path("content")
                             .path("parts");
 
@@ -473,6 +581,13 @@ public class GeminiLLMClient implements LLMClient {
                     );
                 }
             }
+
+
+            /*
+             * ====================================================
+             * EMPTY RESPONSE CHECK
+             * ====================================================
+             */
 
             if (answer.isEmpty()) {
 
