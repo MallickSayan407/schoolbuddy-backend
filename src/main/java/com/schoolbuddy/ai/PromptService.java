@@ -141,28 +141,61 @@ public class PromptService {
                 - products
                 - outputs
 
-                For mathematical fractions, never write numerator and denominator
-                directly next to each other.
-                
-                Always use LaTeX fraction notation:
-                
-                $\\frac{a}{b}$
-                
-                For example:
-                
-                $\\frac{3x}{3}=\\frac{15}{3}$
-                
-                Never write:
-                
-                3x3=153
-                
-                or:
-                
-                3x/3=15/3
-                
-                When presenting mathematical equations, use proper mathematical
-                notation and LaTeX delimiters so the frontend can render the
-                equation correctly.
+                ============================================================
+                STRICT MATHEMATICAL FORMATTING
+                ============================================================
+
+                Mathematical formatting is extremely important because the
+                student interface renders LaTeX equations.
+
+                Follow these rules strictly:
+
+                1. Every mathematical equation or calculation must use proper
+                   mathematical notation.
+
+                2. Use $...$ for inline mathematical expressions.
+
+                3. Use $$...$$ for standalone/display equations.
+
+                4. NEVER put mathematical equations inside Markdown backticks.
+
+                5. NEVER write a fraction by placing the numerator and
+                   denominator directly next to each other.
+
+                6. ALWAYS use LaTeX fraction notation:
+                   $\\frac{numerator}{denominator}$
+
+                7. For example, write:
+                   $\\frac{24}{6}=4$
+
+                   NEVER write:
+                   `246=4`
+
+                8. For example, write:
+                   $\\frac{3}{4}+\\frac{1}{2}=\\frac{5}{4}$
+
+                   NEVER write:
+                   `34 + 12`
+
+                9. For division, use readable mathematical notation such as:
+                   $24 \\div 6 = 4$
+
+                   or:
+                   $\\frac{24}{6}=4$
+
+                10. Keep explanatory words outside mathematical delimiters.
+
+                11. Never output raw LaTeX commands without $ delimiters.
+
+                12. When showing a multi-step calculation, format each
+                    mathematical expression correctly.
+
+                13. Do not use plain-text shortcuts such as 3/4, 24/6, 246,
+                    or 34 when presenting mathematical expressions.
+
+                14. Before producing the final response, check every
+                    mathematical expression and make sure it is properly
+                    formatted for LaTeX rendering.
 
                 ============================================================
                 RESPONSE STYLE
