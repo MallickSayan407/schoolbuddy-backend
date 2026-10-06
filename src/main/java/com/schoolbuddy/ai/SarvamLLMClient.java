@@ -3,7 +3,6 @@ package com.schoolbuddy.ai;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
@@ -26,17 +25,19 @@ public class SarvamLLMClient implements LLMClient {
     public SarvamLLMClient(
             ObjectMapper objectMapper,
             @Value("${sarvam.api.key:}") String apiKey,
-            @Value("${sarvam.api.url:https://api.sarvam.ai/v2/chat/completions}") String apiUrl,
-            @Value("${sarvam.api.model:gemma4}") String model
+            @Value("${sarvam.api.url:https://api.sarvam.ai/v1/chat/completions}") String apiUrl,
+            @Value("${sarvam.api.model:sarvam-105b}") String model
     ) {
         this.objectMapper = objectMapper;
         this.apiKey = apiKey;
         this.apiUrl = apiUrl;
         this.model = model;
 
-        this.restClient = RestClient.builder()
+        this.restClient = RestClient
+                .builder()
                 .build();
     }
+
 
     /*
      * ============================================================
@@ -101,15 +102,17 @@ public class SarvamLLMClient implements LLMClient {
     ) {
 
         if (apiKey == null || apiKey.isBlank()) {
+
             throw new IllegalStateException(
-                    "Sarvam API key is not configured. " +
-                            "Set the SARVAM_API_KEY environment variable."
+                    "Sarvam API key is not configured. "
+                            + "Set the SARVAM_API_KEY environment variable."
             );
         }
 
+
         /*
          * --------------------------------------------------------
-         * Build messages
+         * BUILD MESSAGES
          * --------------------------------------------------------
          */
 
@@ -118,7 +121,9 @@ public class SarvamLLMClient implements LLMClient {
 
 
         /*
+         * --------------------------------------------------------
          * SYSTEM MESSAGE
+         * --------------------------------------------------------
          */
 
         Map<String, Object> systemMessage =
@@ -143,7 +148,9 @@ public class SarvamLLMClient implements LLMClient {
 
 
         /*
+         * --------------------------------------------------------
          * USER MESSAGE
+         * --------------------------------------------------------
          */
 
         Map<String, Object> userMessageObject =
@@ -175,7 +182,7 @@ public class SarvamLLMClient implements LLMClient {
              * ----------------------------------------------------
              * TEXT + IMAGE
              *
-             * Sarvam requires an inline data URI:
+             * Sarvam multimodal format:
              *
              * data:image/png;base64,....
              * ----------------------------------------------------
@@ -183,6 +190,11 @@ public class SarvamLLMClient implements LLMClient {
 
             List<Map<String, Object>> content =
                     new ArrayList<>();
+
+
+            /*
+             * TEXT PART
+             */
 
             Map<String, Object> textPart =
                     new HashMap<>();
@@ -199,6 +211,10 @@ public class SarvamLLMClient implements LLMClient {
 
             content.add(textPart);
 
+
+            /*
+             * IMAGE PART
+             */
 
             Map<String, Object> imagePart =
                     new HashMap<>();
@@ -268,9 +284,22 @@ public class SarvamLLMClient implements LLMClient {
                 0.3
         );
 
+        /*
+         * Sarvam-105B can use reasoning tokens.
+         *
+         * We are using Sarvam as a fallback provider,
+         * so disable reasoning and reserve the token budget
+         * for the actual educational response.
+         */
+
+        requestBody.put(
+                "reasoning_effort",
+                null
+        );
+
         requestBody.put(
                 "max_tokens",
-                1000
+                1600
         );
 
         requestBody.put(
@@ -288,7 +317,9 @@ public class SarvamLLMClient implements LLMClient {
         String responseBody =
                 restClient.post()
                         .uri(apiUrl)
-                        .contentType(MediaType.APPLICATION_JSON)
+                        .contentType(
+                                MediaType.APPLICATION_JSON
+                        )
                         .header(
                                 "api-subscription-key",
                                 apiKey
@@ -336,7 +367,18 @@ public class SarvamLLMClient implements LLMClient {
                 );
             }
 
-            return content.asText();
+            String answer =
+                    content.asText();
+
+            if (answer == null
+                    || answer.isBlank()) {
+
+                throw new IllegalStateException(
+                        "Sarvam returned an empty response."
+                );
+            }
+
+            return answer;
 
         } catch (Exception exception) {
 
